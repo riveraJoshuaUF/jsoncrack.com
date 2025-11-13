@@ -73,6 +73,34 @@ const LiveEditor = dynamic(() => import("../features/editor/LiveEditor"), {
   ssr: false,
 });
 
+function setAtPath(root: any, tokens: Array<string | number>, value: any): any {
+  if (!tokens || tokens.length === 0) return value;
+  
+  const [head, ...rest] = tokens;
+  
+  // clone root properly
+  let cloned: any;
+  if (Array.isArray(root)) {
+    cloned = root.slice(); // shallow copy array
+  } else if (root && typeof root === "object") {
+    cloned = { ...root }; // shallow copy object
+  } else {
+    // root is null/undefined, create new container
+    cloned = typeof head === "number" ? [] : {};
+  }
+
+  if (rest.length === 0) {
+    // final assignment
+    cloned[head as any] = value;
+  } else {
+    // recurse: get next level, recursively update it, assign back
+    const nextLevel = cloned[head as any];
+    cloned[head as any] = setAtPath(nextLevel, rest, value);
+  }
+  
+  return cloned;
+}
+
 const EditorPage = () => {
   const { query, isReady } = useRouter();
   const { setColorScheme } = useMantineColorScheme();
@@ -87,6 +115,32 @@ const EditorPage = () => {
   useEffect(() => {
     setColorScheme(darkmodeEnabled ? "dark" : "light");
   }, [darkmodeEnabled, setColorScheme]);
+
+  // listen for nodeModalSave event and apply the edit to JSON
+  useEffect(() => {
+    const handleNodeSave = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { path, value } = customEvent.detail;
+
+      try {
+        // parse current contents
+        const currentContents = useFile.getState().getContents();
+        const currentJson = JSON.parse(currentContents);
+
+        // apply the edit by path (path is an array of keys/indices)
+        const updated = setAtPath(currentJson, path, value);
+        const newContents = JSON.stringify(updated, null, 2);
+
+        // update the file store (this updates left editor and visualization)
+        useFile.getState().setContents({ contents: newContents, hasChanges: true });
+      } catch (error) {
+        console.error("Failed to apply node edit:", error);
+      }
+    };
+
+    window.addEventListener("nodeModalSave", handleNodeSave);
+    return () => window.removeEventListener("nodeModalSave", handleNodeSave);
+  }, []);
 
   return (
     <>
@@ -130,5 +184,7 @@ const EditorPage = () => {
     </>
   );
 };
+
+
 
 export default EditorPage;
